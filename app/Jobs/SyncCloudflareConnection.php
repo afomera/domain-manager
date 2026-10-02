@@ -30,6 +30,12 @@ class SyncCloudflareConnection implements ShouldBeUnique, ShouldQueue
 
     public int $timeout = 55;
 
+    /**
+     * Release the "one sync at a time" lock after 10 minutes even if this job never ran (say, it was
+     * queued on a connection no worker listens to), so Sync can't get stuck behind a stranded job.
+     */
+    public int $uniqueFor = 600;
+
     public function __construct(public CloudflareConnection $cloudflareConnection) {}
 
     public function uniqueId(): string

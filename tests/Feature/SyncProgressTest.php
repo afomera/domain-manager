@@ -159,4 +159,12 @@ class SyncProgressTest extends TestCase
         $this->assertNull($connection->sync_batch_id);
         $this->assertStringContainsString('2 zones or lookups couldn’t be synced', $connection->last_sync_error);
     }
+
+    public function test_a_stranded_sync_cannot_hold_the_lock_forever(): void
+    {
+        $job = new SyncCloudflareConnection($this->connection);
+
+        $this->assertGreaterThan(0, $job->uniqueFor);
+        $this->assertLessThanOrEqual(CloudflareConnection::SYNC_STALE_AFTER_MINUTES * 60, $job->uniqueFor, 'The lock must expire by the time the UI treats the sync as stale.');
+    }
 }
