@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Domain Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: top nav, single centered column, one quiet table. Neutral everywhere; red/amber only for real problems. */
+  :root {
+    --bg: #ffffff;
+    --subtle: #f6f6f7;
+    --line: #e7e7ea;
+    --fg: #18181b;
+    --muted: #71717a;
+    --faint: #a1a1aa;
+    --crit: #c52b2b;
+    --warn: #a25b00;
+    --overlay: rgb(0 0 0 / 0.2);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111113; --subtle: #19191c; --line: #26262a; --fg: #ececee; --muted: #8d8d96; --faint: #5c5c64;
+      --crit: #f16b6b; --warn: #e3a54d; --overlay: rgb(0 0 0 / 0.5);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111113; --subtle: #19191c; --line: #26262a; --fg: #ececee; --muted: #8d8d96; --faint: #5c5c64;
+    --crit: #f16b6b; --warn: #e3a54d; --overlay: rgb(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
+  body { background: var(--bg); color: var(--fg); margin: 0; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.13"></script>
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style type="text/tailwindcss">
+  @theme inline {
+    --color-bg: var(--bg);
+    --color-subtle: var(--subtle);
+    --color-line: var(--line);
+    --color-fg: var(--fg);
+    --color-muted: var(--muted);
+    --color-faint: var(--faint);
+    --color-crit: var(--crit);
+    --color-warn: var(--warn);
+    --color-overlay: var(--overlay);
+    --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @layer base {
+    body { @apply font-sans text-sm antialiased; }
+    :focus-visible { @apply outline-1 outline-offset-2 outline-fg; }
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .btn { @apply inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[13px] text-fg hover:bg-subtle transition-colors; }
+  .btn-solid { @apply border-fg bg-fg text-bg hover:bg-fg hover:opacity-85; }
+  .tab[aria-pressed="true"] { @apply text-fg border-fg; }
+  svg.lucide { width: 15px; height: 15px; stroke-width: 1.6; flex-shrink: 0; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header class="border-b border-line">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 h-14 flex items-center gap-6">
+    <a href="#" class="flex items-center gap-2 font-medium shrink-0"><i data-lucide="globe"></i><span class="hidden sm:inline">Domain Command Center</span></a>
+    <nav class="flex items-center gap-5 text-[13.5px] text-muted overflow-x-auto" aria-label="Primary">
+      <a href="#" class="text-fg">Domains</a>
+      <a href="#" class="hover:text-fg">DNS</a>
+      <a href="#" class="hover:text-fg">Transfers</a>
+      <a href="#" class="hover:text-fg hidden sm:inline">Activity</a>
+    </nav>
+    <div class="ml-auto flex items-center gap-1">
+      <button id="theme" class="rounded-md p-2 text-muted hover:text-fg hover:bg-subtle" aria-label="Toggle theme"><i data-lucide="sun-moon"></i></button>
+      <a href="#" class="rounded-md p-2 text-muted hover:text-fg hover:bg-subtle" aria-label="Settings"><i data-lucide="settings"></i></a>
+    </div>
+  </div>
+</header>
+
+<main id="list" class="mx-auto max-w-6xl px-4 sm:px-6 py-10 flex flex-col gap-8">
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div class="flex flex-col gap-1">
+      <h1 class="text-2xl font-semibold tracking-tight">Domains</h1>
+      <p class="text-muted num" id="summary"></p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="sync" class="btn"><i data-lucide="refresh-cw"></i>Sync</button>
+      <button class="btn btn-solid"><i data-lucide="plus"></i>Add domain</button>
+    </div>
+  </div>
+
+  <div id="alerts" class="flex flex-col gap-1.5"></div>
+
+  <section class="flex flex-col gap-3" aria-label="Domains">
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-line">
+      <div class="flex gap-5 text-[13.5px]" id="tabs">
+        <button class="tab -mb-px border-b border-transparent pb-2.5 text-muted hover:text-fg" aria-pressed="true" data-reg="all">All <span class="text-faint num" data-n="all"></span></button>
+        <button class="tab -mb-px border-b border-transparent pb-2.5 text-muted hover:text-fg" aria-pressed="false" data-reg="cloudflare">Cloudflare <span class="text-faint num" data-n="cloudflare"></span></button>
+        <button class="tab -mb-px border-b border-transparent pb-2.5 text-muted hover:text-fg" aria-pressed="false" data-reg="squarespace">Squarespace <span class="text-faint num" data-n="squarespace"></span></button>
+      </div>
+      <div class="ml-auto flex items-center gap-3 pb-2 w-full sm:w-auto">
+        <label class="relative flex-1 sm:w-56">
+          <span class="sr-only">Search domains</span>
+          <i data-lucide="search" class="absolute left-0 top-1/2 -translate-y-1/2 text-faint"></i>
+          <input id="q" type="search" placeholder="Search" class="w-full bg-transparent py-1 pl-6 text-[13px] placeholder:text-faint focus:outline-none">
+        </label>
+        <select id="sort" aria-label="Sort" class="bg-transparent text-[13px] text-muted focus:outline-none cursor-pointer">
+          <option value="expires">Expiry</option>
+          <option value="name">Name</option>
+          <option value="price">Price</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[680px] text-left">
+        <thead class="text-[12px] text-muted">
+          <tr class="[&>th]:py-2 [&>th]:pr-4 [&>th]:font-normal">
+            <th>Domain</th>
+            <th>Registrar</th>
+            <th>Expires</th>
+            <th>Auto‑renew</th>
+            <th class="text-right">Renewal</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="text-[12px] text-faint num" id="foot"></p>
+  </section>
+</main>
+
+<main id="show" hidden class="mx-auto max-w-6xl px-4 sm:px-6 py-8"></main>
+
+<div id="toast" hidden role="status" class="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-md bg-fg px-4 py-2.5 text-[13px] text-bg shadow-lg flex items-center gap-3 whitespace-nowrap">
+  <span id="toast-msg"></span><span id="toast-api" class="font-mono text-[11.5px] opacity-60"></span>
+</div>
+
+<script>
+  const TODAY = new Date('2026-10-01T00:00:00');
+  // Sample data. In the real app: Cloudflare API + Squarespace import.
+  const DOMAINS = [
+    { name: 'harborlight.dev',   reg: 'cloudflare',  ns: 'cloudflare',  registered: '2021-03-14', expires: '2027-03-14', auto: true,  price: 12.20 },
+    { name: 'quietmetrics.com',  reg: 'cloudflare',  ns: 'cloudflare',  registered: '2019-10-19', expires: '2026-10-19', auto: true,  price: 10.46 },
+    { name: 'railsnotebook.io',  reg: 'cloudflare',  ns: 'cloudflare',  registered: '2022-08-02', expires: '2027-08-02', auto: true,  price: 50.00 },
+    { name: 'tinyinvoice.app',   reg: 'cloudflare',  ns: 'cloudflare',  registered: '2023-12-05', expires: '2026-12-05', auto: true,  price: 14.20 },
+    { name: 'brightledger.com',  reg: 'cloudflare',  ns: 'cloudflare',  registered: '2018-05-30', expires: '2027-05-30', auto: true,  price: 10.46, note: 'Transfer pending' },
+    { name: 'deploywindow.dev',  reg: 'cloudflare',  ns: 'cloudflare',  registered: '2024-04-01', expires: '2027-04-01', auto: true,  price: 12.20 },
+    { name: 'pagewright.co',     reg: 'squarespace', ns: 'squarespace', registered: '2020-10-09', expires: '2026-10-09', auto: false, price: 30.00 },
+    { name: 'oldbandsite.net',   reg: 'squarespace', ns: 'squarespace', registered: '2015-10-04', expires: '2026-10-04', auto: false, price: 20.00 },
+    { name: 'maplecourt.org',    reg: 'squarespace', ns: 'cloudflare',  registered: '2017-01-22', expires: '2027-01-22', auto: true,  price: 20.00 },
+    { name: 'hanamiweekly.com',  reg: 'squarespace', ns: 'cloudflare',  registered: '2024-11-15', expires: '2026-11-15', auto: true,  price: 20.00 },
+    { name: 'fieldnotes.studio', reg: 'squarespace', ns: 'squarespace', registered: '2022-06-30', expires: '2027-06-30', auto: true,  price: 30.00 },
+    { name: 'launchqueue.com',   reg: 'squarespace', ns: 'squarespace', registered: '2026-08-20', expires: '2027-08-20', auto: true,  price: 20.00 },
+    { name: 'gardenledger.com',  reg: 'squarespace', ns: 'cloudflare',  registered: '2016-02-11', expires: '2027-02-11', auto: true,  price: 20.00 },
+  ];
+  const STEPS = ['Add zone to Cloudflare', 'Point nameservers to Cloudflare', 'Unlock at Squarespace', 'Copy auth code', 'Start transfer in Cloudflare', 'Approve transfer email'];
+  const REG = { cloudflare: 'Cloudflare', squarespace: 'Squarespace' };
+
+  const $ = s => document.querySelector(s);
+  const money = n => '$' + n.toFixed(2);
+  const day = d => new Date(d + 'T00:00:00');
+  const days = d => Math.round((day(d) - TODAY) / 86400000);
+  const fmt = d => day(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const critical = d => !d.auto && days(d.expires) <= 30;
+  const lockedUntil = d => { const u = new Date(day(d.registered).getTime() + 60 * 86400000); return u > TODAY ? u : null; };
+
+  // A single quiet note per row; only critical states get color.
+  function note(d) {
+    if (critical(d)) return `<span class="text-crit">Expires in ${days(d.expires)} days</span>`;
+    if (d.note) return d.note;
+    const lock = lockedUntil(d);
+    if (lock) return `Transfer locked until ${lock.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    if (d.reg === 'squarespace' && d.ns === 'cloudflare') return 'Ready to transfer';
+    return '';
+  }
+
+  let state = { reg: 'all', q: '', sort: 'expires' };
+
+  function visible() {
+    const by = { expires: (a, b) => a.expires.localeCompare(b.expires), name: (a, b) => a.name.localeCompare(b.name), price: (a, b) => b.price - a.price };
+    return DOMAINS.filter(d => (state.reg === 'all' || d.reg === state.reg) && d.name.includes(state.q)).sort(by[state.sort]);
+  }
+
+  function render() {
+    const list = visible();
+    $('#rows').innerHTML = list.map(d => `
+      <tr class="border-t border-line hover:bg-subtle cursor-pointer [&>td]:py-3 [&>td]:pr-4" data-name="${d.name}">
+        <td class="font-mono text-[13.5px]"><a href="#${d.name}" class="hover:underline underline-offset-4">${d.name}</a></td>
+        <td>${REG[d.reg]}${d.ns !== d.reg ? `<div class="text-[12px] text-muted">Nameservers: ${REG[d.ns]}</div>` : ''}</td>
+        <td class="num">${fmt(d.expires)}</td>
+        <td class="${critical(d) ? 'text-crit' : d.auto ? '' : 'text-muted'}">${d.auto ? 'On' : 'Off'}</td>
+        <td class="text-right font-mono text-[13px] num">${money(d.price)}</td>
+        <td class="text-muted text-[13px] whitespace-nowrap">
+          <div class="flex items-center justify-end gap-3">${note(d)}<i data-lucide="chevron-right" class="text-faint"></i></div>
+        </td>
+      </tr>`).join('') || `<tr><td colspan="6" class="border-t border-line py-12 text-center text-muted">No domains match “${state.q}”.</td></tr>`;
+    $('#foot').textContent = `${list.length} of ${DOMAINS.length} domains · sample data · last synced 4 minutes ago`;
+    lucide.createIcons();
+  }
+
+  function renderHeader() {
+    const sq = DOMAINS.filter(d => d.reg === 'squarespace').length;
+    const total = DOMAINS.reduce((s, d) => s + d.price, 0);
+    $('#summary').textContent = `${DOMAINS.length} domains · ${DOMAINS.length - sq} on Cloudflare, ${sq} left on Squarespace · ${money(total)}/yr in renewals`;
+    ['all', 'cloudflare', 'squarespace'].forEach(k => $(`[data-n="${k}"]`).textContent = k === 'all' ? DOMAINS.length : DOMAINS.filter(d => d.reg === k).length);
+    $('#alerts').innerHTML = DOMAINS.filter(critical).sort((a, b) => a.expires.localeCompare(b.expires)).map(d => `
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+        <i data-lucide="circle-alert" class="text-crit"></i>
+        <span><span class="font-mono">${d.name}</span> expires ${fmt(d.expires)} and auto‑renew is off.</span>
+        <button class="underline underline-offset-4 decoration-line hover:decoration-fg" data-open="${d.name}">Review</button>
+      </div>`).join('');
+  }
+
+  // ---- DNS records (sample; real app: Cloudflare /zones/:id/dns_records) ----
+  const TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT'];
+  const PROXYABLE = ['A', 'AAAA', 'CNAME'];
+  const TTLS = [[1, 'Auto'], [60, '1 min'], [300, '5 min'], [3600, '1 hr'], [86400, '1 day']];
+  const CONTENT_LABEL = { A: 'IPv4 address', AAAA: 'IPv6 address', CNAME: 'Target', MX: 'Mail server', TXT: 'Content' };
+  const ttlLabel = t => (TTLS.find(x => x[0] === t) || [, t + 's'])[1];
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let uid = 0;
+  const RECORDS = {};
+
+  function seed(n) {
+    const r = [
+      { type: 'A', name: '@', content: '76.76.21.21', ttl: 1, proxied: true },
+      { type: 'CNAME', name: 'www', content: n, ttl: 1, proxied: true },
+      { type: 'MX', name: '@', content: 'in1-smtp.messagingengine.com', priority: 10, ttl: 3600 },
+      { type: 'MX', name: '@', content: 'in2-smtp.messagingengine.com', priority: 20, ttl: 3600 },
+      { type: 'TXT', name: '@', content: 'v=spf1 include:spf.messagingengine.com ?all', ttl: 3600 },
+      { type: 'TXT', name: '_dmarc', content: `v=DMARC1; p=quarantine; rua=mailto:dmarc@${n}`, ttl: 3600 },
+      { type: 'CNAME', name: 'fm1._domainkey', content: `fm1.${n}.dkim.fmhosted.com`, ttl: 1 },
+    ];
+    if (n === 'tinyinvoice.app') r.push({ type: 'CNAME', name: 'app', content: 'cname.vercel-dns.com', ttl: 1 });
+    if (n === 'railsnotebook.io') r.push({ type: 'AAAA', name: '@', content: '2606:4700:3030::6815:1e8', ttl: 1, proxied: true });
+    return r.map(x => ({ id: ++uid, proxied: false, ...x }));
+  }
+  const recordsFor = n => (RECORDS[n] ??= seed(n));
+  const order = { A: 0, AAAA: 1, CNAME: 2, MX: 3, TXT: 4 };
+  const sorted = list => [...list].sort((a, b) => order[a.type] - order[b.type] || a.name.localeCompare(b.name) || (a.priority ?? 0) - (b.priority ?? 0));
+
+  let dz = null; // drawer state: { name, tab, editing: null | 'new' | id, confirmDel, q }
+
+  function openDrawer(name) { location.hash = name; }
+
+  // Routing: #domain.tld shows the domain page, anything else shows the list.
+  function route() {
+    const d = DOMAINS.find(x => x.name === decodeURIComponent(location.hash.slice(1)));
+    $('#list').hidden = !!d;
+    $('#show').hidden = !d;
+    if (!d) { dz = null; return; }
+    dz = { name: d.name, tab: d.ns === 'cloudflare' ? 'dns' : 'details', editing: null, confirmDel: false, q: '' };
+    renderDrawer();
+    window.scrollTo(0, 0);
+  }
+  addEventListener('hashchange', route);
+
+  function renderDrawer() {
+    const d = DOMAINS.find(x => x.name === dz.name);
+    const hasDns = d.ns === 'cloudflare';
+    const tab = (key, label) => `<button class="tab -mb-px border-b border-transparent pb-2.5 text-muted hover:text-fg" aria-pressed="${dz.tab === key}" data-tab="${key}">${label}</button>`;
+    $('#show').innerHTML = `
+      <div class="flex flex-col gap-6">
+        <a href="#" class="inline-flex w-fit items-center gap-1 text-[13px] text-muted hover:text-fg"><i data-lucide="chevron-left"></i>Domains</a>
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div class="flex flex-col gap-1 min-w-0">
+            <h1 class="font-mono text-2xl font-medium tracking-tight break-all">${d.name}</h1>
+            <p class="text-muted num">${REG[d.reg]}${d.ns !== d.reg ? ` · nameservers at ${REG[d.ns]}` : ''} · expires ${fmt(d.expires)} · auto‑renew ${d.auto ? 'on' : (critical(d) ? '<span class="text-crit">off</span>' : 'off')}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <a class="btn" href="https://${d.name}" target="_blank" rel="noopener"><i data-lucide="arrow-up-right"></i>Visit</a>
+            ${d.auto ? '' : '<button class="btn btn-solid">Turn on auto‑renew</button>'}
+          </div>
+        </div>
+        ${critical(d) ? `<div class="flex items-center gap-3 text-[13px]"><i data-lucide="circle-alert" class="text-crit"></i>Expires in ${days(d.expires)} days and auto‑renew is off.</div>` : ''}
+        <div class="flex gap-5 text-[13.5px] border-b border-line">
+          ${hasDns ? tab('dns', `DNS records <span class="text-faint num">${recordsFor(d.name).length}</span>`) : ''}
+          ${tab('details', 'Details')}
+        </div>
+        <div>${dz.tab === 'dns' ? dnsPanel(d) : detailsPanel(d)}</div>
+      </div>`;
+    if (dz.tab === 'dns') renderRecords();
+    lucide.createIcons();
+  }
+
+  function dnsPanel(d) {
+    return `
+      <div class="flex flex-col gap-4">
+        <div class="flex items-center gap-3">
+          <label class="relative flex-1">
+            <span class="sr-only">Filter records</span>
+            <i data-lucide="search" class="absolute left-0 top-1/2 -translate-y-1/2 text-faint"></i>
+            <input id="rec-q" type="search" value="${esc(dz.q)}" placeholder="Filter by name, type or content" class="w-full bg-transparent py-1 pl-6 text-[13px] placeholder:text-faint focus:outline-none">
+          </label>
+          <button class="btn btn-solid" data-add ${dz.editing === 'new' ? 'disabled' : ''}><i data-lucide="plus"></i>Add record</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[640px] text-left text-[13px]">
+            <thead class="text-[12px] text-muted">
+              <tr class="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-normal"><th class="w-16">Type</th><th>Name</th><th>Content</th><th class="w-16">TTL</th><th class="w-24">Proxy</th></tr>
+            </thead>
+            <tbody id="dns-rows"></tbody>
+          </table>
+        </div>
+        <p class="text-[12px] text-faint">Changes apply immediately through the Cloudflare API. Proxied records always use Auto TTL.</p>
+      </div>`;
+  }
+
+  function renderRecords() {
+    const list = sorted(recordsFor(dz.name)).filter(r => !dz.q || `${r.type} ${r.name} ${r.content}`.toLowerCase().includes(dz.q));
+    const rows = list.map(r => dz.editing === r.id ? formRow(r) : `
+      <tr class="border-t border-line hover:bg-subtle cursor-pointer [&>td]:py-2.5 [&>td]:pr-3 align-top" data-rec="${r.id}" tabindex="0">
+        <td class="font-mono text-[12.5px]">${r.type}</td>
+        <td class="font-mono text-[12.5px] break-all">${esc(r.name)}</td>
+        <td class="font-mono text-[12.5px] text-muted break-all">${r.type === 'MX' ? `<span class="text-faint">${r.priority}</span> ` : ''}${esc(r.content)}</td>
+        <td class="text-muted">${ttlLabel(r.ttl)}</td>
+        <td class="${r.proxied ? '' : 'text-muted'}"><span class="inline-flex items-center gap-1.5"><i data-lucide="${r.proxied ? 'cloud' : 'cloud-off'}"></i>${r.proxied ? 'Proxied' : 'DNS only'}</span></td>
+      </tr>`).join('');
+    $('#dns-rows').innerHTML = (dz.editing === 'new' ? formRow(null) : '') +
+      (rows || `<tr><td colspan="5" class="border-t border-line py-10 text-center text-muted">${dz.q ? `No records match “${esc(dz.q)}”.` : 'No DNS records yet. Add one to get started.'}</td></tr>`);
+    lucide.createIcons();
+    const first = $('#rec-form [autofocus]'); if (first) first.focus();
+  }
+
+  function formRow(r) {
+    const isNew = !r;
+    r = r || { type: 'A', name: '', content: '', ttl: 1, proxied: true, priority: 10 };
+    const field = 'w-full rounded-md border border-line bg-bg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-fg';
+    return `
+      <tr class="border-t border-line bg-subtle"><td colspan="5" class="p-0">
+        <form id="rec-form" class="flex flex-col gap-4 p-4" data-id="${isNew ? '' : r.id}" novalidate>
+          <div class="text-[13px] font-medium">${isNew ? 'New record' : `Edit ${r.type} record`}</div>
+          <div class="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-3">
+            <label class="flex flex-col gap-1.5 text-[12px] text-muted">Type
+              <select id="rf-type" class="${field} font-mono">${TYPES.map(t => `<option ${t === r.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+            </label>
+            <label class="flex flex-col gap-1.5 text-[12px] text-muted">Name
+              <div class="flex items-center rounded-md border border-line bg-bg focus-within:border-fg">
+                <input id="rf-name" value="${esc(r.name)}" placeholder="@ for root" ${isNew ? 'autofocus' : ''} class="min-w-0 flex-1 bg-transparent px-2.5 py-1.5 font-mono text-[13px] text-fg focus:outline-none" autocomplete="off" spellcheck="false">
+                <span class="pr-2.5 font-mono text-[12px] text-faint truncate">.${dz.name}</span>
+              </div>
+            </label>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-[1fr_96px] gap-3">
+            <label class="flex flex-col gap-1.5 text-[12px] text-muted"><span id="rf-content-label">${CONTENT_LABEL[r.type]}</span>
+              <input id="rf-content" value="${esc(r.content)}" ${isNew ? '' : 'autofocus'} class="${field} font-mono text-fg" autocomplete="off" spellcheck="false">
+            </label>
+            <label id="rf-priority-wrap" class="flex flex-col gap-1.5 text-[12px] text-muted" ${r.type === 'MX' ? '' : 'hidden'}>Priority
+              <input id="rf-priority" type="number" min="0" max="65535" value="${r.priority ?? 10}" class="${field} font-mono text-fg num">
+            </label>
+          </div>
+          <div class="flex flex-wrap items-end gap-x-6 gap-y-3">
+            <label class="flex flex-col gap-1.5 text-[12px] text-muted">TTL
+              <select id="rf-ttl" class="${field} w-28" ${r.proxied && PROXYABLE.includes(r.type) ? 'disabled' : ''}>${TTLS.map(([v, l]) => `<option value="${v}" ${v === r.ttl ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            </label>
+            <label id="rf-proxy-wrap" class="flex items-center gap-2 pb-2 text-[13px] ${PROXYABLE.includes(r.type) ? '' : 'opacity-40'}">
+              <input id="rf-proxied" type="checkbox" class="accent-[var(--fg)]" ${r.proxied && PROXYABLE.includes(r.type) ? 'checked' : ''} ${PROXYABLE.includes(r.type) ? '' : 'disabled'}>
+              Proxy through Cloudflare
+            </label>
+          </div>
+          <p id="rf-error" class="text-[12.5px] text-crit" hidden></p>
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            ${isNew ? '' : dz.confirmDel
+              ? `<span class="text-[13px]">Delete this record?</span>
+                 <button type="button" class="btn text-crit" data-del-yes>Delete</button>
+                 <button type="button" class="btn" data-del-no>Keep</button>`
+              : `<button type="button" class="text-[13px] text-muted hover:text-crit" data-del>Delete</button>`}
+            <div class="ml-auto flex gap-2">
+              <button type="button" class="btn" data-cancel>Cancel</button>
+              <button type="submit" class="btn btn-solid">${isNew ? 'Add record' : 'Save'}</button>
+            </div>
+          </div>
+        </form>
+      </td></tr>`;
+  }
+
+  function validate(rec, id) {
+    if (!/^(@|\*|(\*\.)?[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?)$/i.test(rec.name)) return 'Enter a name like @, www or mail. Use @ for the root domain.';
+    const host = /^([a-z0-9_]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\.?$/i;
+    if (rec.type === 'A' && !(/^(\d{1,3}\.){3}\d{1,3}$/.test(rec.content) && rec.content.split('.').every(o => +o <= 255))) return 'Enter an IPv4 address, like 192.0.2.10.';
+    if (rec.type === 'AAAA' && !/^[0-9a-f:]+$/i.test(rec.content) || rec.type === 'AAAA' && !rec.content.includes(':')) return 'Enter an IPv6 address, like 2001:db8::1.';
+    if ((rec.type === 'CNAME' || rec.type === 'MX') && !host.test(rec.content)) return `Enter a hostname, like ${rec.type === 'MX' ? 'mx1.example.com' : 'target.example.com'}.`;
+    if (rec.type === 'TXT' && !rec.content) return 'TXT content can’t be empty.';
+    if (rec.type === 'TXT' && rec.content.length > 2048) return 'TXT content is limited to 2,048 characters.';
+    if (rec.type === 'MX' && !(Number.isInteger(rec.priority) && rec.priority >= 0 && rec.priority <= 65535)) return 'Priority must be a whole number from 0 to 65535.';
+    const others = recordsFor(dz.name).filter(x => x.id !== id && x.name.toLowerCase() === rec.name.toLowerCase());
+    if (rec.type === 'CNAME' && others.length) return `A CNAME can’t share a name with other records. Remove the ${others[0].type} record on “${rec.name}” first.`;
+    if (rec.type !== 'CNAME' && others.some(x => x.type === 'CNAME')) return `“${rec.name}” already has a CNAME record. Remove it first, or pick another name.`;
+    return null;
+  }
+
+  let toastTimer;
+  function toast(msg, api) {
+    $('#toast-msg').textContent = msg; $('#toast-api').textContent = api;
+    $('#toast').hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').hidden = true, 2600);
+  }
+
+  function detailsPanel(d) {
+    const migrating = d.reg === 'squarespace';
+    const done = d.ns === 'cloudflare' ? 2 : 0;
+    const lock = lockedUntil(d);
+    const row = (k, v) => `<div class="flex justify-between gap-4 py-2 border-t border-line"><dt class="text-muted">${k}</dt><dd class="text-right num">${v}</dd></div>`;
+    return `
+      <div class="grid gap-12 lg:grid-cols-2 items-start">
+        <div class="flex flex-col gap-4">
+        <dl class="text-[13px] [&>div:first-child]:border-t-0">
+          ${row('Registrar', REG[d.reg])}
+          ${row('Registered', fmt(d.registered))}
+          ${row('Expires', critical(d) ? `<span class="text-crit">${fmt(d.expires)} · ${days(d.expires)} days</span>` : fmt(d.expires))}
+          ${row('Auto‑renew', d.auto ? 'On' : 'Off')}
+          ${row('Renewal', `<span class="font-mono">${money(d.price)}</span>`)}
+          ${row('Nameservers', d.ns === 'cloudflare' ? '<span class="font-mono text-[12.5px]">ada.ns.cloudflare.com<br>kurt.ns.cloudflare.com</span>' : 'Squarespace defaults')}
+        </dl>
+        ${d.ns === 'cloudflare' ? '' : '<p class="text-[12.5px] text-muted">DNS for this domain is hosted at Squarespace. Point the nameservers to Cloudflare to manage records here.</p>'}
+        </div>
+        ${migrating ? `
+        <div class="flex flex-col gap-3">
+          <div class="flex justify-between text-[13px]"><span class="font-medium">Move to Cloudflare</span><span class="text-muted num">${done} of ${STEPS.length}</span></div>
+          <ol class="flex flex-col text-[13px]">
+            ${STEPS.map((s, i) => `
+              <li class="flex items-center gap-3 py-1.5 ${i < done ? 'text-faint' : i === done ? '' : 'text-muted'}">
+                <span class="w-4 text-center font-mono text-[12px]">${i < done ? '<i data-lucide="check"></i>' : i + 1}</span>
+                <span class="flex-1">${s}</span>
+                ${i === done && !lock ? '<button class="underline underline-offset-4 decoration-line hover:decoration-fg">Start</button>' : ''}
+              </li>`).join('')}
+          </ol>
+          ${lock ? `<p class="text-[12.5px] text-muted">Registered ${fmt(d.registered)}. Transfers open ${lock.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (60‑day ICANN lock).</p>` : ''}
+          ${d.ns !== 'cloudflare' ? '<p class="text-[12.5px] text-muted">Cloudflare requires its own nameservers before it accepts a transfer.</p>' : ''}
+        </div>` : ''}
+      </div>`;
+  }
+
+  // Drawer interactions
+  const drawer = $('#show');
+  drawer.addEventListener('click', e => {
+    const t = e.target;
+    if (t.closest('[data-tab]')) { dz.tab = t.closest('[data-tab]').dataset.tab; dz.editing = null; return renderDrawer(); }
+    if (t.closest('[data-add]')) { dz.editing = 'new'; dz.confirmDel = false; return renderRecords(); }
+    if (t.closest('[data-cancel]')) { dz.editing = null; dz.confirmDel = false; return renderRecords(); }
+    if (t.closest('[data-del]')) { dz.confirmDel = true; return renderRecords(); }
+    if (t.closest('[data-del-no]')) { dz.confirmDel = false; return renderRecords(); }
+    if (t.closest('[data-del-yes]')) {
+      const list = recordsFor(dz.name), i = list.findIndex(r => r.id === dz.editing);
+      const [gone] = list.splice(i, 1);
+      dz.editing = null; dz.confirmDel = false;
+      renderDrawer();
+      return toast(`Deleted ${gone.type} record ${gone.name}`, 'DELETE /dns_records/' + gone.id);
+    }
+    const tr = t.closest('tr[data-rec]');
+    if (tr) { dz.editing = +tr.dataset.rec; dz.confirmDel = false; renderRecords(); }
+  });
+  drawer.addEventListener('keydown', e => {
+    const tr = e.target.closest('tr[data-rec]');
+    if (tr && e.key === 'Enter') { dz.editing = +tr.dataset.rec; renderRecords(); }
+  });
+  drawer.addEventListener('input', e => {
+    if (e.target.id === 'rec-q') { dz.q = e.target.value.trim().toLowerCase(); renderRecords(); e.target.focus(); }
+  });
+  drawer.addEventListener('change', e => {
+    if (e.target.id !== 'rf-type' && e.target.id !== 'rf-proxied') return;
+    const type = $('#rf-type').value, proxyable = PROXYABLE.includes(type);
+    $('#rf-content-label').textContent = CONTENT_LABEL[type];
+    $('#rf-priority-wrap').hidden = type !== 'MX';
+    $('#rf-proxied').disabled = !proxyable;
+    if (!proxyable) $('#rf-proxied').checked = false;
+    $('#rf-proxy-wrap').classList.toggle('opacity-40', !proxyable);
+    const proxied = $('#rf-proxied').checked;
+    $('#rf-ttl').disabled = proxied;
+    if (proxied) $('#rf-ttl').value = '1';
+  });
+  drawer.addEventListener('submit', e => {
+    e.preventDefault();
+    const id = e.target.dataset.id ? +e.target.dataset.id : null;
+    const type = $('#rf-type').value;
+    const rec = {
+      type,
+      name: $('#rf-name').value.trim().replace(new RegExp('\\.?' + dz.name.replace(/\./g, '\\.') + '\\.?$', 'i'), '') || '',
+      content: $('#rf-content').value.trim(),
+      ttl: +$('#rf-ttl').value,
+      proxied: PROXYABLE.includes(type) && $('#rf-proxied').checked,
+    };
+    if (rec.name === '') rec.name = $('#rf-name').value.trim() ? '@' : '';
+    if (type === 'MX') rec.priority = Number($('#rf-priority').value);
+    if (rec.proxied) rec.ttl = 1;
+    const err = validate(rec, id);
+    if (err) { const p = $('#rf-error'); p.textContent = err; p.hidden = false; return; }
+    if (id) {
+      Object.assign(recordsFor(dz.name).find(r => r.id === id), rec, rec.type === 'MX' ? {} : { priority: undefined });
+      toast(`Updated ${rec.type} record ${rec.name}`, 'PATCH /dns_records/' + id);
+    } else {
+      const created = { id: ++uid, ...rec };
+      recordsFor(dz.name).push(created);
+      toast(`Added ${rec.type} record ${rec.name}`, 'POST /dns_records');
+    }
+    dz.editing = null;
+    renderDrawer();
+  });
+
+  $('#rows').addEventListener('click', e => { const tr = e.target.closest('tr[data-name]'); if (tr) openDrawer(tr.dataset.name); });
+  $('#alerts').addEventListener('click', e => { const b = e.target.closest('[data-open]'); if (b) openDrawer(b.dataset.open); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (dz?.editing) { dz.editing = null; dz.confirmDel = false; renderRecords(); }
+    }
+    if (e.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); (dz?.tab === 'dns' ? $('#rec-q') : $('#q')).focus(); }
+  });
+  $('#q').addEventListener('input', e => { state.q = e.target.value.trim().toLowerCase(); render(); });
+  $('#sort').addEventListener('change', e => { state.sort = e.target.value; render(); });
+  $('#tabs').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $('#tabs').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    state.reg = b.dataset.reg; render();
+  });
+  $('#sync').addEventListener('click', e => e.currentTarget.querySelector('svg')?.animate([{ transform: 'rotate(0)' }, { transform: 'rotate(360deg)' }], { duration: 600 }));
+
+  const root = document.documentElement;
+  try { const t = localStorage.getItem('dcc-theme'); if (t) root.dataset.theme = t; } catch {}
+  $('#theme').addEventListener('click', () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('dcc-theme', root.dataset.theme); } catch {}
+  });
+
+  renderHeader();
+  render();
+  route();
+</script>
+</body>
+</html>

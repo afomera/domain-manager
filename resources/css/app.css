@@ -1,0 +1,135 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+/* Neutral everywhere; red/amber only for real problems. */
+:root {
+    --bg: #ffffff;
+    --subtle: #f6f6f7;
+    --line: #e7e7ea;
+    --fg: #18181b;
+    --muted: #71717a;
+    --faint: #a1a1aa;
+    --crit: #c52b2b;
+    --warn: #a25b00;
+    --proxy: #f38020; /* Cloudflare's orange cloud */
+    --accent: var(--fg); /* progress and current-step highlights; swap for a brand color here */
+    color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+        --bg: #111113;
+        --subtle: #19191c;
+        --line: #26262a;
+        --fg: #ececee;
+        --muted: #8d8d96;
+        --faint: #5c5c64;
+        --crit: #f16b6b;
+        --warn: #e3a54d;
+        --proxy: #f6821f;
+        color-scheme: dark;
+    }
+}
+
+:root[data-theme='dark'] {
+    --bg: #111113;
+    --subtle: #19191c;
+    --line: #26262a;
+    --fg: #ececee;
+    --muted: #8d8d96;
+    --faint: #5c5c64;
+    --crit: #f16b6b;
+    --warn: #e3a54d;
+    --proxy: #f6821f;
+    color-scheme: dark;
+}
+
+@theme inline {
+    --color-bg: var(--bg);
+    --color-subtle: var(--subtle);
+    --color-line: var(--line);
+    --color-fg: var(--fg);
+    --color-muted: var(--muted);
+    --color-faint: var(--faint);
+    --color-crit: var(--crit);
+    --color-warn: var(--warn);
+    --color-proxy: var(--proxy);
+    --color-accent: var(--accent);
+    --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@layer base {
+    body {
+        @apply bg-bg text-fg font-sans text-sm antialiased;
+    }
+
+    :focus-visible {
+        @apply outline-1 outline-offset-2 outline-fg;
+    }
+}
+
+@layer components {
+    .btn {
+        @apply inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[13px] text-fg transition-colors hover:bg-subtle disabled:opacity-50;
+    }
+
+    .btn-solid {
+        @apply border-fg bg-fg text-bg hover:bg-fg hover:opacity-85;
+    }
+
+    .tab {
+        @apply -mb-px border-b border-transparent pb-2.5 text-muted hover:text-fg;
+    }
+
+    .tab[aria-current='true'] {
+        @apply border-fg text-fg;
+    }
+
+    .field {
+        @apply w-full rounded-md border border-line bg-bg px-2.5 py-1.5 text-[13px] text-fg focus:border-fg focus:outline-none disabled:opacity-50;
+    }
+
+    .icon {
+        @apply size-[15px] shrink-0 stroke-[1.6];
+    }
+}
+
+@utility num {
+    font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition: none !important;
+    }
+}
+
+[x-cloak] {
+    display: none !important;
+}
+
+/* Theme toggle icon follows the active theme, using the same rules as the color tokens above. */
+.theme-icon-dark {
+    display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) .theme-icon-light {
+        display: none;
+    }
+
+    :root:not([data-theme='light']) .theme-icon-dark {
+        display: block;
+    }
+}
+
+:root[data-theme='dark'] .theme-icon-light {
+    display: none;
+}
+
+:root[data-theme='dark'] .theme-icon-dark {
+    display: block;
+}
