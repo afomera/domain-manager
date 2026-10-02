@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Bus;
 
 /**
  * A user's Cloudflare API token. The token is encrypted at rest with the app key.
@@ -24,10 +25,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property ?CarbonImmutable $last_synced_at
  * @property ?string $last_sync_error
  * @property ?string $sync_status "queued" or "running" while a sync is in flight
- * @property ?array{message: string, percent: int} $sync_progress
+ * @property ?array{message: string, percent?: int} $sync_progress
  * @property ?CarbonImmutable $sync_started_at
+ * @property ?string $sync_batch_id the job batch importing zones and lookups, once the quick phase is done
  */
-#[Fillable(['api_token', 'token_hint', 'token_expires_on', 'verified_at', 'last_synced_at', 'last_sync_error', 'sync_status', 'sync_progress', 'sync_started_at'])]
+#[Fillable(['api_token', 'token_hint', 'token_expires_on', 'verified_at', 'last_synced_at', 'last_sync_error', 'sync_status', 'sync_progress', 'sync_started_at', 'sync_batch_id'])]
 #[Hidden(['api_token'])]
 class CloudflareConnection extends Model
 {
@@ -137,6 +139,23 @@ class CloudflareConnection extends Model
     {
         return $this->sync_status === 'queued'
             && $this->sync_started_at?->lt(now()->subSeconds(self::SYNC_WAITING_WARNING_SECONDS));
+    }
+
+    /**
+     * Overall progress: the quick phase reports its own percent; after that, the batch's progress fills 20–100%.
+     */
+    public function syncPercent(): int
+    {
+        if ($this->sync_batch_id && $batch = Bus::findBatch($this->sync_batch_id)) {
+            return (int) floor(20 + 0.8 * $batch->progress());
+        }
+
+        return (int) ($this->sync_progress['percent'] ?? 0);
+    }
+
+    public function syncMessage(): string
+    {
+        return $this->sync_progress['message'] ?? 'Starting…';
     }
 
     public function client(): CloudflareClient

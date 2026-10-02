@@ -1,8 +1,8 @@
 @props(['connection', 'firstImport' => false])
 
 @php
-    $percent = $connection->sync_progress['percent'] ?? 0;
-    $message = $connection->sync_progress['message'] ?? 'Starting…';
+    $percent = $connection->syncPercent();
+    $message = $connection->syncMessage();
 @endphp
 
 <div {{ $attributes->merge(['class' => 'flex flex-col gap-2.5 rounded-md border border-line p-4']) }} role="status" aria-live="polite">

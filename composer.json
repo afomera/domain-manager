@@ -7,6 +7,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "aws/aws-sdk-php": "^3.399",
         "laravel/fortify": "^1.40",
         "laravel/framework": "^13.17",
         "laravel/reverb": "^1.0",

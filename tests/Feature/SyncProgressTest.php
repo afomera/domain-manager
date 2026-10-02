@@ -2,10 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ImportZoneRecords;
+use App\Jobs\LookUpDomainRegistrar;
 use App\Jobs\SyncCloudflareConnection;
 use App\Models\CloudflareConnection;
 use App\Services\Cloudflare\CloudflareSync;
+use Illuminate\Bus\PendingBatch;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
@@ -106,8 +110,53 @@ class SyncProgressTest extends TestCase
         $this->assertSame(100.0, (float) end($steps)[1]);
         $this->assertSame(array_column($steps, 1), collect(array_column($steps, 1))->sort()->values()->all(), 'Progress never goes backwards.');
 
-        app(CloudflareSync::class)->runTracked($this->connection);
-        $this->assertNull($this->connection->fresh()->sync_status);
-        $this->assertNull($this->connection->fresh()->sync_progress);
+        SyncCloudflareConnection::dispatchSync($this->connection);
+        $connection = $this->connection->fresh();
+        $this->assertNull($connection->sync_status);
+        $this->assertNull($connection->sync_progress);
+        $this->assertNull($connection->sync_batch_id);
+        $this->assertNotNull($connection->last_synced_at);
+        $this->assertSame(1, $connection->user->domains()->count());
+    }
+
+    public function test_every_sync_job_fits_inside_managed_queue_time_limits(): void
+    {
+        $jobs = [new SyncCloudflareConnection($this->connection), new ImportZoneRecords(1), new LookUpDomainRegistrar(1, now()->toIso8601String())];
+
+        foreach ($jobs as $job) {
+            $this->assertLessThanOrEqual(60, $job->timeout, $job::class.' must finish within a Flex managed queue job limit.');
+            $this->assertGreaterThan($job->timeout, config('queue.connections.database.retry_after'), 'A running job must never be handed to a second worker.');
+        }
+    }
+
+    public function test_the_slow_part_fans_out_as_a_batch_of_small_jobs(): void
+    {
+        Bus::fake();
+        Http::fake([
+            'api.cloudflare.com/client/v4/zones?*' => Http::response($this->cloudflareResponse([
+                ['id' => 'zone_a', 'name' => 'a.dev', 'status' => 'active', 'account' => ['id' => 'acc_1', 'name' => 'Personal']],
+                ['id' => 'zone_b', 'name' => 'b.dev', 'status' => 'active', 'account' => ['id' => 'acc_1', 'name' => 'Personal']],
+            ])),
+            'api.cloudflare.com/client/v4/accounts?*' => Http::response($this->cloudflareResponse([['id' => 'acc_1', 'name' => 'Personal']])),
+            'api.cloudflare.com/client/v4/accounts/acc_1/registrar/registrations*' => Http::response($this->cloudflareResponse([], ['cursor' => ''])),
+        ]);
+
+        (new SyncCloudflareConnection($this->connection))->handle(app(CloudflareSync::class));
+
+        Bus::assertBatched(fn (PendingBatch $batch) => $batch->jobs->whereInstanceOf(ImportZoneRecords::class)->count() === 2
+            && $batch->jobs->whereInstanceOf(LookUpDomainRegistrar::class)->count() === 2);
+        $this->assertSame('running', $this->connection->fresh()->sync_status);
+    }
+
+    public function test_failed_pieces_become_a_warning_when_the_batch_finishes(): void
+    {
+        $this->connection->update(['sync_status' => 'running', 'sync_started_at' => now(), 'sync_batch_id' => 'abc']);
+
+        SyncCloudflareConnection::complete($this->connection->id, now()->toIso8601String(), [], failures: 2);
+
+        $connection = $this->connection->fresh();
+        $this->assertNull($connection->sync_status);
+        $this->assertNull($connection->sync_batch_id);
+        $this->assertStringContainsString('2 zones or lookups couldn’t be synced', $connection->last_sync_error);
     }
 }

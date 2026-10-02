@@ -4,7 +4,6 @@ namespace App\Services\Cloudflare;
 
 use App\Enums\DnsRecordType;
 use App\Enums\Provider;
-use App\Events\PortfolioUpdated;
 use App\Models\CloudflareConnection;
 use App\Models\DnsRecord;
 use App\Models\Domain;
@@ -38,32 +37,9 @@ class CloudflareSync
     public function __construct(protected RdapClient $rdap) {}
 
     /**
-     * Run a sync while recording its status and progress on the connection, so the UI can follow along.
+     * Run a whole sync in one go (tests, and anywhere a time limit isn't a concern).
+     * The queued path splits the same phases into a job batch; see SyncCloudflareConnection.
      *
-     * @return array{domains: int, records: int, warnings: list<string>}
-     *
-     * @throws CloudflareException
-     */
-    public function runTracked(CloudflareConnection $connection): array
-    {
-        $connection->update([
-            'sync_status' => 'running',
-            'sync_progress' => ['message' => 'Starting…', 'percent' => 0],
-            'sync_started_at' => now(),
-        ]);
-        PortfolioUpdated::dispatch($connection->user_id);
-
-        try {
-            return $this->run($connection, function (string $message, float $percent) use ($connection) {
-                $connection->update(['sync_progress' => ['message' => $message, 'percent' => (int) floor($percent)]]);
-            });
-        } finally {
-            $connection->update(['sync_status' => null, 'sync_progress' => null]);
-            PortfolioUpdated::dispatch($connection->user_id);
-        }
-    }
-
-    /**
      * @param  (Closure(string, float): void)|null  $progress  receives a step description and overall percent complete
      * @return array{domains: int, records: int, warnings: list<string>}
      *
@@ -71,8 +47,51 @@ class CloudflareSync
      */
     public function run(CloudflareConnection $connection, ?Closure $progress = null): array
     {
-        $this->warnings = [];
         $this->progress = $progress;
+        $plan = $this->prepare($connection);
+        $syncedAt = CarbonImmutable::parse($plan['synced_at']);
+
+        $steps = count($plan['zones']) + count($plan['lookups']);
+        $done = 0;
+        $recordCount = 0;
+
+        try {
+            foreach (Domain::query()->findMany(array_keys($plan['zones'])) as $domain) {
+                $this->report("Importing DNS records for {$domain->name}", 20 + 80 * $done++ / max(1, $steps));
+                $recordCount += $this->importRecords($domain);
+            }
+        } catch (CloudflareException $exception) {
+            $connection->update(['last_sync_error' => $exception->getMessage()]);
+
+            throw $exception;
+        }
+
+        foreach (Domain::query()->findMany($plan['lookups']) as $domain) {
+            $this->report("Looking up the registrar for {$domain->name}", 20 + 80 * $done++ / max(1, $steps));
+            $this->lookUpRegistrar($domain, $syncedAt);
+        }
+
+        $this->report('Finishing up', 100);
+        $this->finish($connection, $syncedAt, $plan['warnings']);
+
+        return [
+            'domains' => $connection->user->domains()->count(),
+            'records' => $recordCount,
+            'warnings' => $plan['warnings'],
+        ];
+    }
+
+    /**
+     * Phase 1, quick: zones, Registrar data and prices; creates/updates domains and drops removed zones.
+     * Returns what's left to do, as small independent units of work.
+     *
+     * @return array{synced_at: string, zones: array<int, string>, lookups: list<int>, warnings: list<string>}
+     *
+     * @throws CloudflareException
+     */
+    public function prepare(CloudflareConnection $connection): array
+    {
+        $this->warnings = [];
         $client = $connection->client();
         $syncedAt = CarbonImmutable::now();
 
@@ -90,33 +109,79 @@ class CloudflareSync
             $this->report('Checking renewal prices', 15);
             $this->applyRenewalPrices($client, $connection, $registrations);
 
-            $recordCount = 0;
-            foreach ($zones->values() as $index => $zone) {
-                $this->report("Importing DNS records for {$zone['name']}", 20 + 55 * $index / max(1, $zones->count()));
-                $domain = $this->syncZone($connection, strtolower($zone['name']), $zone, $syncedAt);
-                $recordCount += $this->syncRecords($client, $domain, $zone['id']);
+            $zoneDomains = [];
+            foreach ($zones as $name => $zone) {
+                $zoneDomains[$this->syncZone($connection, $name, $zone, $syncedAt)->id] = $zone['id'];
             }
 
             $this->detachRemovedZones($connection, $zones->keys()->all());
-            $this->lookUpExternalRegistrations($connection, array_keys($registrations), $syncedAt);
-            $this->report('Finishing up', 100);
         } catch (CloudflareException $exception) {
             $connection->update(['last_sync_error' => $exception->getMessage()]);
 
             throw $exception;
         }
 
+        return [
+            'synced_at' => $syncedAt->toIso8601String(),
+            'zones' => $zoneDomains,
+            'lookups' => $connection->user->domains()->whereNotIn('name', array_keys($registrations))->pluck('id')->all(),
+            'warnings' => $this->warnings,
+        ];
+    }
+
+    /**
+     * Phase 2a, one zone: pull its DNS records.
+     *
+     * @throws CloudflareException
+     */
+    public function importRecords(Domain $domain): int
+    {
+        if (! $domain->hasCloudflareZone()) {
+            return 0;
+        }
+
+        return $this->syncRecords($domain->cloudflareClient(), $domain, $domain->cloudflare_zone_id);
+    }
+
+    /**
+     * Phase 2b, one domain registered elsewhere: fill registrar and dates from RDAP.
+     */
+    public function lookUpRegistrar(Domain $domain, CarbonImmutable $syncedAt): void
+    {
+        $registration = $this->rdap->lookup($domain->name);
+
+        if (! $registration) {
+            return;
+        }
+
+        if ($registration->registrarName) {
+            $domain->registrar = Provider::fromRegistrarName($registration->registrarName);
+            $domain->registrar_name = $registration->registrarName;
+        }
+
+        $domain->registered_on = $registration->registeredOn ?? $domain->registered_on;
+        $domain->expires_on = $registration->expiresOn ?? $domain->expires_on;
+        $domain->synced_at = $syncedAt;
+
+        if (! $domain->hasCloudflareZone() || $domain->cloudflare_zone_status !== 'active') {
+            $domain->nameserver_provider = $domain->registrar;
+        }
+
+        $domain->save();
+    }
+
+    /**
+     * Phase 3: record the outcome.
+     *
+     * @param  list<string>  $warnings
+     */
+    public function finish(CloudflareConnection $connection, CarbonImmutable $syncedAt, array $warnings): void
+    {
         $connection->update([
             'verified_at' => $syncedAt,
             'last_synced_at' => $syncedAt,
-            'last_sync_error' => $this->warnings ? implode(' ', $this->warnings) : null,
+            'last_sync_error' => $warnings ? implode(' ', $warnings) : null,
         ]);
-
-        return [
-            'domains' => $connection->user->domains()->count(),
-            'records' => $recordCount,
-            'warnings' => $this->warnings,
-        ];
     }
 
     /**
@@ -349,40 +414,5 @@ class CloudflareSync
                     'nameserver_provider' => $domain->registrar,
                 ]);
             });
-    }
-
-    /**
-     * Fill registrar and dates from RDAP for domains Cloudflare didn't report as registered with it.
-     *
-     * @param  list<string>  $registeredWithCloudflare
-     */
-    protected function lookUpExternalRegistrations(CloudflareConnection $connection, array $registeredWithCloudflare, CarbonImmutable $syncedAt): void
-    {
-        $domains = $connection->user->domains()->whereNotIn('name', $registeredWithCloudflare)->get();
-
-        $domains->each(function (Domain $domain, int $index) use ($syncedAt, $domains) {
-            $this->report("Looking up the registrar for {$domain->name}", 75 + 25 * $index / max(1, $domains->count()));
-
-            $registration = $this->rdap->lookup($domain->name);
-
-            if (! $registration) {
-                return;
-            }
-
-            if ($registration->registrarName) {
-                $domain->registrar = Provider::fromRegistrarName($registration->registrarName);
-                $domain->registrar_name = $registration->registrarName;
-            }
-
-            $domain->registered_on = $registration->registeredOn ?? $domain->registered_on;
-            $domain->expires_on = $registration->expiresOn ?? $domain->expires_on;
-            $domain->synced_at = $syncedAt;
-
-            if (! $domain->hasCloudflareZone() || $domain->cloudflare_zone_status !== 'active') {
-                $domain->nameserver_provider = $domain->registrar;
-            }
-
-            $domain->save();
-        });
     }
 }
