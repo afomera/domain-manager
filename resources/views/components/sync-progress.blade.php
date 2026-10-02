@@ -20,6 +20,7 @@
     @if ($connection->isWaitingForWorker())
         <p class="text-[12.5px] text-warn">
             Still waiting to start. Syncs run on the queue — is a worker running? Locally, <span class="font-mono">composer run dev</span> starts one.
+            <button type="button" wire:click="cancelSync" class="ml-1 text-fg underline decoration-line underline-offset-4 hover:decoration-fg">Cancel</button>
         </p>
     @endif
 </div>

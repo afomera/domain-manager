@@ -283,6 +283,18 @@ new #[Title('Domains')] class extends Component
     }
 
     /**
+     * Stop waiting on a sync no worker has picked up.
+     */
+    public function cancelSync(): void
+    {
+        $this->connection?->cancelQueuedSync();
+        $this->watchingSync = false;
+        unset($this->connection);
+
+        $this->dispatch('toast', message: 'Sync cancelled');
+    }
+
+    /**
      * Polled while a sync runs: refreshes the list (so a first import fills in live) and announces the result.
      */
     public function checkSync(): void

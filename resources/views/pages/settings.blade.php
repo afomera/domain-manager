@@ -180,6 +180,17 @@ new #[Title('Settings')] class extends Component
     }
 
     /**
+     * Stop waiting on a sync no worker has picked up.
+     */
+    public function cancelSync(): void
+    {
+        $this->connection?->cancelQueuedSync();
+        unset($this->connection);
+
+        $this->dispatch('toast', message: 'Sync cancelled');
+    }
+
+    /**
      * Polled while a sync runs.
      */
     public function checkSync(): void

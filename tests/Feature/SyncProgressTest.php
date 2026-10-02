@@ -167,4 +167,34 @@ class SyncProgressTest extends TestCase
         $this->assertGreaterThan(0, $job->uniqueFor);
         $this->assertLessThanOrEqual(CloudflareConnection::SYNC_STALE_AFTER_MINUTES * 60, $job->uniqueFor, 'The lock must expire by the time the UI treats the sync as stale.');
     }
+
+    public function test_a_sync_waiting_for_a_worker_can_be_cancelled(): void
+    {
+        Queue::fake();
+        $this->connection->queueSync();
+        $this->travel(1)->minutes();
+
+        Livewire::actingAs($this->connection->user)
+            ->test('pages::domains.index')
+            ->assertSee('is a worker running?')
+            ->call('cancelSync')
+            ->assertDispatched('toast', message: 'Sync cancelled')
+            ->assertSet('watchingSync', false)
+            ->assertDontSee('Syncing…');
+
+        $this->assertNull($this->connection->fresh()->sync_status);
+
+        // The lock is released, so the next sync queues straight away.
+        $this->connection->fresh()->queueSync();
+        Queue::assertPushed(SyncCloudflareConnection::class, 2);
+    }
+
+    public function test_a_running_sync_is_not_cancelled(): void
+    {
+        $this->connection->update(['sync_status' => 'running', 'sync_started_at' => now()]);
+
+        $this->connection->cancelQueuedSync();
+
+        $this->assertSame('running', $this->connection->fresh()->sync_status);
+    }
 }

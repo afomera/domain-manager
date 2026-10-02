@@ -7,12 +7,14 @@ use App\Jobs\SyncCloudflareConnection;
 use App\Services\Cloudflare\CloudflareClient;
 use Carbon\CarbonImmutable;
 use Database\Factories\CloudflareConnectionFactory;
+use Illuminate\Bus\UniqueLock;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * A user's Cloudflare API token. The token is encrypted at rest with the app key.
@@ -123,6 +125,21 @@ class CloudflareConnection extends Model
         ]);
 
         SyncCloudflareConnection::dispatch($this);
+        PortfolioUpdated::dispatch($this->user_id);
+    }
+
+    /**
+     * Give up on a sync that's still waiting for a worker: clear its state and release the
+     * one-at-a-time lock, so the next Sync click goes straight through.
+     */
+    public function cancelQueuedSync(): void
+    {
+        if ($this->sync_status !== 'queued') {
+            return;
+        }
+
+        $this->update(['sync_status' => null, 'sync_progress' => null, 'sync_batch_id' => null]);
+        Cache::lock(UniqueLock::getKey(new SyncCloudflareConnection($this)))->forceRelease();
         PortfolioUpdated::dispatch($this->user_id);
     }
 
