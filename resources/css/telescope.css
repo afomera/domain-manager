@@ -67,6 +67,14 @@ code {
     fill: var(--fg);
 }
 
+.border,
+.border-top,
+.border-right,
+.border-bottom,
+.border-left {
+    border-color: var(--line) !important;
+}
+
 :focus-visible {
     outline: 1px solid var(--fg);
     outline-offset: 2px;
@@ -339,6 +347,31 @@ code {
 
 .code-bg {
     background: var(--code);
+}
+
+.code-bg pre,
+.vjs-tree {
+    font-size: 13px;
+}
+
+/* The JSON viewer's hover is a light-blue row that hides the light text; use a faint overlay instead. */
+.vjs-tree-node:hover,
+.vjs-tree-node.is-highlight {
+    background-color: rgb(255 255 255 / 0.06);
+}
+
+.vjs-tree-brackets:hover,
+.vjs-carets:hover,
+.vjs-tree .vjs-tree__node:hover {
+    color: #ffffff;
+}
+
+.vjs-tree-node .vjs-indent-unit.has-line {
+    border-left-color: rgb(255 255 255 / 0.12);
+}
+
+.copy-to-clipboard:hover {
+    opacity: 1;
 }
 
 .code-bg .list-enter:not(.dontanimate),
