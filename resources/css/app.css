@@ -1,50 +1,8 @@
 @import 'tailwindcss';
+@import './tokens.css';
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
-
-/* Neutral everywhere; red/amber only for real problems. */
-:root {
-    --bg: #ffffff;
-    --subtle: #f6f6f7;
-    --line: #e7e7ea;
-    --fg: #18181b;
-    --muted: #71717a;
-    --faint: #a1a1aa;
-    --crit: #c52b2b;
-    --warn: #a25b00;
-    --proxy: #f38020; /* Cloudflare's orange cloud */
-    --accent: var(--fg); /* progress and current-step highlights; swap for a brand color here */
-    color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme='light']) {
-        --bg: #111113;
-        --subtle: #19191c;
-        --line: #26262a;
-        --fg: #ececee;
-        --muted: #8d8d96;
-        --faint: #5c5c64;
-        --crit: #f16b6b;
-        --warn: #e3a54d;
-        --proxy: #f6821f;
-        color-scheme: dark;
-    }
-}
-
-:root[data-theme='dark'] {
-    --bg: #111113;
-    --subtle: #19191c;
-    --line: #26262a;
-    --fg: #ececee;
-    --muted: #8d8d96;
-    --faint: #5c5c64;
-    --crit: #f16b6b;
-    --warn: #e3a54d;
-    --proxy: #f6821f;
-    color-scheme: dark;
-}
 
 @theme inline {
     --color-bg: var(--bg);
